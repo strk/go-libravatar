@@ -77,7 +77,7 @@ func (v *Libravatar) baseURL(domain string) (url string, err error) {
 		url = "http://"
 		service = "avatars"
 	}
-	cname, addrs, e := net.LookupSRV(service, "tcp", domain)
+	_, addrs, e := net.LookupSRV(service, "tcp", domain)
 	if e != nil {
 		//fmt.Printf("DEBUG: Lookup error: %s\n", err) // debug
 		e := e.(*net.DNSError)
@@ -91,10 +91,9 @@ func (v *Libravatar) baseURL(domain string) (url string, err error) {
 		url += v.fallbackHost
 		return
 	}
-	url += cname
 	// TODO: sort by priority, but for now just pick the first
 	if len(addrs) < 1 {
-		err = fmt.Errorf("empty SVR response")
+		err = fmt.Errorf("empty SRV response")
 		return
 	}
 	/*

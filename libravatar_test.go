@@ -9,7 +9,7 @@ import "testing"
 func TestFromEmail(t *testing.T) {
 
 	cases := []struct{ in, want string }{
-		{"strk@kbt.io", "http://_avatars._tcp.kbt.io.avatars.kbt.io/avatar/fe2a9e759730ee64c44bf8901bf4ccc3"},
+		{"strk@kbt.io", "http://avatars.kbt.io/avatar/fe2a9e759730ee64c44bf8901bf4ccc3"},
 		{"strk@keybit.net", "http://cdn.libravatar.org/avatar/34bafd290f6f39380f5f87e0122daf83"},
 		{"strk@nonexistent.domain", "http://cdn.libravatar.org/avatar/3f30177111597990b15f8421eaf736c7"},
 	}
