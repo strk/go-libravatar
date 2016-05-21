@@ -61,6 +61,11 @@ func (v *Libravatar) SetFallbackHost(host string) {
 	v.fallbackHost = host
 }
 
+// Set useHTTPS flag
+func (v *Libravatar) SetUseHTTPS(use bool) {
+	v.useHTTPS = use
+}
+
 func (v *Libravatar) baseURL(domain string) (url string, err error) {
 	//(cname string, addrs []*SRV, err error)
 	//var cname, addrs, err string
