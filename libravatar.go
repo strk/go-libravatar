@@ -69,7 +69,7 @@ func (v *Libravatar) SetFallbackHost(host string) {
 	v.fallbackHost = host
 }
 
-// Set useHTTPS flag
+// Set useHTTPS flag (only used with email)
 func (v *Libravatar) SetUseHTTPS(use bool) {
 	v.useHTTPS = use
 }
