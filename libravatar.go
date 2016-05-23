@@ -8,6 +8,7 @@ package libravatar
 
 import (
 	"crypto/md5"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"net"
@@ -48,6 +49,13 @@ func New() *Libravatar {
 	return o
 }
 
+func getSHA256(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	hash := sha256.New()
+	hash.Write([]byte(s))
+	return fmt.Sprintf("%x", hash.Sum(nil))
+}
+
 func getMD5(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
 	hash := md5.New()
@@ -66,11 +74,11 @@ func (v *Libravatar) SetUseHTTPS(use bool) {
 	v.useHTTPS = use
 }
 
-func (v *Libravatar) baseURL(domain string) (url string, err error) {
+func (v *Libravatar) baseURL(domain string, useHTTPS bool) (url string, err error) {
 	//(cname string, addrs []*SRV, err error)
 	//var cname, addrs, err string
 	service := ""
-	if v.useHTTPS {
+	if useHTTPS {
 		url = "https://"
 		service = "avatars-sec"
 	} else {
@@ -121,10 +129,56 @@ func (v *Libravatar) FromEmail(email string) (url string, err error) {
 		return
 	}
 	hash := getMD5(email)
-	baseurl, err := v.baseURL(domain)
+	baseurl, err := v.baseURL(domain, v.useHTTPS)
 	if err != nil {
 		return
 	}
+	url = baseurl + "/avatar/" + hash
+
+	// Append parameters as needed
+	sep := "?"
+	if v.useDomain {
+		url += sep + "domain=" + domain
+		sep = "&"
+	}
+	if v.picSize != 0 {
+		url += sep + "s=" + string(v.picSize)
+		sep = "&"
+	}
+	if v.defUrl != "" {
+		url += sep + "d=" + v.defUrl
+		sep = "&"
+	}
+	return
+}
+
+// Return url of the avatar for the given url (tipically for OpenID)
+func (v *Libravatar) FromURL(in string) (url string, err error) {
+  parts := strings.Split(in, "/")
+	// http://domain <-- smallest valid, has 3 parts
+  if len(parts) < 3 {
+		err = errors.New("invalid url")
+		return
+	}
+
+	domain := parts[2]
+	if len(domain) == 0 {
+		err = errors.New("invalid email")
+		return
+	}
+
+	var useHTTPS = v.useHTTPS
+  if parts[0] == "https:" {
+      useHTTPS = true;
+  }
+
+	hash := getSHA256(in)
+	baseurl, err := v.baseURL(domain, useHTTPS)
+	if err != nil {
+		return
+	}
+
+
 	url = baseurl + "/avatar/" + hash
 
 	// Append parameters as needed
