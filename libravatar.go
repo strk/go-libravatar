@@ -12,9 +12,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	//"net/http"
-	//"net/url"
 	"strings"
+	"time"
 )
 
 // Default images (to be used as defaultURL)
@@ -35,17 +34,34 @@ const (
 	Retro = "retro"
 )
 
+/* This should be moved in its own file */
+type cacheKey struct {
+	service string
+	domain  string
+}
+
+type cacheValue struct {
+	target    string
+	checkedAt time.Time
+}
+
 type Libravatar struct {
-	defUrl       string // default url
-	picSize      int    // picture size
-	useDomain    bool   //
-	useHTTPS     bool
-	fallbackHost string
+	defUrl            string // default url
+	picSize           int    // picture size
+	useDomain         bool   //
+	useHTTPS          bool
+	fallbackHost      string
+	nameCache         map[cacheKey]cacheValue
+	nameCacheDuration time.Duration
 }
 
 // Instanciate a library handle
 func New() *Libravatar {
 	o := &Libravatar{fallbackHost: "cdn.libravatar.org"}
+	o.nameCache = make(map[cacheKey]cacheValue)
+	// According to https://wiki.libravatar.org/running_your_own/
+	// the time-to-live (cache expiry) should be set to at least 1 day.
+	o.nameCacheDuration = 24 * time.Hour
 	return o
 }
 
@@ -85,33 +101,48 @@ func (v *Libravatar) baseURL(domain string, useHTTPS bool) (url string, err erro
 		url = "http://"
 		service = "avatars"
 	}
-	_, addrs, e := net.LookupSRV(service, "tcp", domain)
-	if e != nil {
-		//fmt.Printf("DEBUG: Lookup error: %s\n", err) // debug
-		e := e.(*net.DNSError)
-		if e.IsTimeout {
-			// A timeout we'll consider a real error
-			err = e
+	key := cacheKey{service, domain}
+	//fmt.Println("DEBUG: key is ", key)
+	var tgt string
+	now := time.Now()
+	val, found := v.nameCache[key]
+	if found && now.Sub(val.checkedAt) <= v.nameCacheDuration {
+		tgt = val.target
+		//fmt.Println("DEBUG: cache hit, target for ", key, " is ", tgt)
+	} else {
+		_, addrs, e := net.LookupSRV(service, "tcp", domain)
+		fmt.Println("DEBUG: lookup of ", service, domain, " took ", time.Since(now))
+		if e != nil {
+			//fmt.Println("DEBUG: Lookup error: ", e) // debug
+			e := e.(*net.DNSError)
+			if e.IsTimeout {
+				// A timeout we'll consider a real error
+				// TODO: use fallback instead i
+				err = e
+				fmt.Println("DEBUG: lookup timeout") // debug
+				return
+			}
+			// An host-not-found (assumed here) would trigger a fallback
+			// to libravatar.org
+			url += v.fallbackHost
+			v.nameCache[key] = cacheValue{checkedAt: now, target: v.fallbackHost}
 			return
 		}
-		// An host-not-found (assumed here) would trigger a fallback
-		// to libravatar.org
-		url += v.fallbackHost
-		return
-	}
-	// TODO: sort by priority, but for now just pick the first
-	if len(addrs) < 1 {
-		err = fmt.Errorf("empty SRV response")
-		return
-	}
-	/*
-		for _, v := range addrs {
-			fmt.Printf("DEBUG: Target:%s - Port:%d - Priority:%d - Weight:%d\n",
-				v.Target, v.Port, v.Priority, v.Weight)
+		// TODO: sort by priority, but for now just pick the first
+		if len(addrs) < 1 {
+			err = fmt.Errorf("empty SRV response")
+			return
 		}
-	*/
-	tgt := addrs[0].Target
-	tgt = tgt[:len(tgt)-1] // strip the ending dot
+		/*
+			for _, v := range addrs {
+				fmt.Printf("DEBUG: Target:%s - Port:%d - Priority:%d - Weight:%d\n",
+					v.Target, v.Port, v.Priority, v.Weight)
+			}
+		*/
+		tgt = addrs[0].Target
+		tgt = tgt[:len(tgt)-1] // strip the ending dot
+		v.nameCache[key] = cacheValue{checkedAt: now, target: tgt}
+	}
 	url += tgt
 	return
 }
