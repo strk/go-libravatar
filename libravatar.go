@@ -4,14 +4,17 @@
 
 // Implements support for federated avatars lookup.
 // See https://wiki.libravatar.org/api/
+
 package libravatar
 
 import (
 	"crypto/md5"
 	"crypto/sha256"
-	"errors"
 	"fmt"
+	"math/rand"
 	"net"
+	"net/mail"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -34,6 +37,11 @@ const (
 	Retro = "retro"
 )
 
+var (
+	// Default object, enabling object-less function calls
+	DefaultLibravatar = New()
+)
+
 /* This should be moved in its own file */
 type cacheKey struct {
 	service string
@@ -46,37 +54,35 @@ type cacheValue struct {
 }
 
 type Libravatar struct {
-	defUrl            string // default url
-	picSize           int    // picture size
-	useDomain         bool   //
-	useHTTPS          bool
-	fallbackHost      string
-	nameCache         map[cacheKey]cacheValue
-	nameCacheDuration time.Duration
+	defUrl             string // default url
+	picSize            int    // picture size
+	fallbackHost       string // default fallback URL
+	secureFallbackHost string // default fallback URL for secure connections
+	useHTTPS           bool
+	nameCache          map[cacheKey]cacheValue
+	nameCacheDuration  time.Duration
+	minAvatarSize      uint   // smallest image dimension allowed
+	maxAvatarSize      uint   // largest image dimension allowed
+	AvatarSize         uint   // what dimension should be used
+	serviceBase        string // SRV record to be queried for federation
+	secureServiceBase  string // SRV record to be queried for federation with secure servers
 }
 
 // Instanciate a library handle
 func New() *Libravatar {
-	o := &Libravatar{fallbackHost: "cdn.libravatar.org"}
-	o.nameCache = make(map[cacheKey]cacheValue)
 	// According to https://wiki.libravatar.org/running_your_own/
 	// the time-to-live (cache expiry) should be set to at least 1 day.
-	o.nameCacheDuration = 24 * time.Hour
-	return o
-}
-
-func getSHA256(s string) string {
-	s = strings.ToLower(strings.TrimSpace(s))
-	hash := sha256.New()
-	hash.Write([]byte(s))
-	return fmt.Sprintf("%x", hash.Sum(nil))
-}
-
-func getMD5(s string) string {
-	s = strings.ToLower(strings.TrimSpace(s))
-	hash := md5.New()
-	hash.Write([]byte(s))
-	return fmt.Sprintf("%x", hash.Sum(nil))
+	return &Libravatar{
+		fallbackHost:       `cdn.libravatar.org`,
+		secureFallbackHost: `seccdn.libravatar.org`,
+		minAvatarSize:      1,
+		maxAvatarSize:      512,
+		AvatarSize:         0, // unset, defaults to 80
+		serviceBase:        `avatars`,
+		secureServiceBase:  `avatars-sec`,
+		nameCache:          make(map[cacheKey]cacheValue),
+		nameCacheDuration:  24 * time.Hour,
+	}
 }
 
 // Set the hostname for fallbacks in case no avatar service is defined
@@ -90,141 +96,176 @@ func (v *Libravatar) SetUseHTTPS(use bool) {
 	v.useHTTPS = use
 }
 
-func (v *Libravatar) baseURL(domain string, useHTTPS bool) (url string, err error) {
-	//(cname string, addrs []*SRV, err error)
-	//var cname, addrs, err string
-	service := ""
-	if useHTTPS {
-		url = "https://"
-		service = "avatars-sec"
-	} else {
-		url = "http://"
-		service = "avatars"
+// generate hash, either with email address or OpenID
+func (v *Libravatar) genHash(email *mail.Address, openid *url.URL) string {
+	if email != nil {
+		email.Address = strings.ToLower(strings.TrimSpace(email.Address))
+		sum := md5.Sum([]byte(email.Address))
+		return fmt.Sprintf("%x", sum)
+	} else if openid != nil {
+		openid.Scheme = strings.ToLower(openid.Scheme)
+		openid.Host = strings.ToLower(openid.Host)
+		sum := sha256.Sum256([]byte(openid.String()))
+		return fmt.Sprintf("%x", sum)
 	}
-	key := cacheKey{service, domain}
-	//fmt.Println("DEBUG: key is ", key)
-	var tgt string
-	now := time.Now()
-	val, found := v.nameCache[key]
-	if found && now.Sub(val.checkedAt) <= v.nameCacheDuration {
-		tgt = val.target
-		//fmt.Println("DEBUG: cache hit, target for ", key, " is ", tgt)
-	} else {
-		_, addrs, e := net.LookupSRV(service, "tcp", domain)
-		fmt.Println("DEBUG: lookup of ", service, domain, " took ", time.Since(now))
-		if e != nil {
-			//fmt.Println("DEBUG: Lookup error: ", e) // debug
-			e := e.(*net.DNSError)
-			if e.IsTimeout {
-				// A timeout we'll consider a real error
-				// TODO: use fallback instead i
-				err = e
-				fmt.Println("DEBUG: lookup timeout") // debug
-				return
+	// panic, because this should not be reachable
+	panic("Neither Email or OpenID set")
+}
+
+// Gets domain out of email or openid (for openid to be parsed, email has to be nil)
+func (v *Libravatar) getDomain(email *mail.Address, openid *url.URL) string {
+	if email != nil {
+		u, err := url.Parse("//" + email.Address)
+		if err != nil {
+			if v.useHTTPS && v.secureFallbackHost != "" {
+				return v.secureFallbackHost
 			}
-			// An host-not-found (assumed here) would trigger a fallback
-			// to libravatar.org
-			url += v.fallbackHost
-			v.nameCache[key] = cacheValue{checkedAt: now, target: v.fallbackHost}
-			return
+			return v.fallbackHost
 		}
-		// TODO: sort by priority, but for now just pick the first
-		if len(addrs) < 1 {
-			err = fmt.Errorf("empty SRV response")
-			return
-		}
-		/*
-			for _, v := range addrs {
-				fmt.Printf("DEBUG: Target:%s - Port:%d - Priority:%d - Weight:%d\n",
-					v.Target, v.Port, v.Priority, v.Weight)
-			}
-		*/
-		tgt = addrs[0].Target
-		tgt = tgt[:len(tgt)-1] // strip the ending dot
-		v.nameCache[key] = cacheValue{checkedAt: now, target: tgt}
+		return u.Host
+	} else if openid != nil {
+		return openid.Host
 	}
-	url += tgt
-	return
+	// panic, because this should not be reachable
+	panic("Neither Email or OpenID set")
+}
+
+// Processes email or openid (for openid to be processed, email has to be nil)
+func (v *Libravatar) process(email *mail.Address, openid *url.URL) (string, error) {
+	URL, err := v.baseURL(email, openid)
+	if err != nil {
+		return "", err
+	}
+	res := fmt.Sprintf("%s/avatar/%s", URL, v.genHash(email, openid))
+
+	values := make(url.Values)
+	if v.defUrl != "" {
+		values.Add("d", v.defUrl)
+	}
+	if v.AvatarSize > 0 {
+		values.Add("s", fmt.Sprintf("%d", v.AvatarSize))
+	}
+
+	if len(values) > 0 {
+		return fmt.Sprintf("%s?%s", res, values.Encode()), nil
+	}
+	return res, nil
+}
+
+// Finds or defaults a URL for Federation (for openid to be used, email has to be nil)
+func (v *Libravatar) baseURL(email *mail.Address, openid *url.URL) (string, error) {
+	var service, protocol, domain string
+
+	if v.useHTTPS {
+		protocol = "https://"
+		service = v.secureServiceBase
+		domain = v.secureFallbackHost
+
+	} else {
+		protocol = "http://"
+		service = v.serviceBase
+		domain = v.fallbackHost
+	}
+
+	_, addrs, err := net.LookupSRV(service, "tcp", v.getDomain(email, openid))
+	if err != nil && err.(*net.DNSError).IsTimeout {
+		return "", err
+	}
+
+	if len(addrs) == 1 {
+		// select only record, if only one is available
+		domain = strings.TrimSuffix(addrs[0].Target, ".")
+	} else if len(addrs) > 1 {
+		// Select first record according to RFC2782 weight
+		// ordering algorithm (page 3)
+
+		type record struct {
+			srv    *net.SRV
+			weight uint16
+		}
+
+		var (
+			total_weight uint16
+			records      []record
+			top_priority = addrs[0].Priority
+			top_record   *net.SRV
+		)
+
+		for _, rr := range addrs {
+			if rr.Priority > top_priority {
+				continue
+			} else if rr.Priority < top_priority {
+				// won't happen, because net sorts
+				// by priority, but just in case
+				total_weight = 0
+				records = nil
+				top_priority = rr.Priority
+			}
+
+			total_weight += rr.Weight
+
+			if rr.Weight > 0 {
+				records = append(records, record{rr, total_weight})
+			} else if rr.Weight == 0 {
+				records = append([]record{record{srv: rr, weight: total_weight}}, records...)
+			}
+		}
+
+		if len(records) == 1 {
+			top_record = records[0].srv
+		} else {
+			randnum := uint16(rand.Intn(int(total_weight)))
+
+			for _, rr := range records {
+				if rr.weight >= randnum {
+					top_record = rr.srv
+					break
+				}
+			}
+		}
+
+		domain = fmt.Sprintf("%s:%d", top_record.Target, top_record.Port)
+	}
+
+	return protocol + domain, nil
 }
 
 // Return url of the avatar for the given email
-func (v *Libravatar) FromEmail(email string) (url string, err error) {
-	i := strings.Index(email, "@")
-	if i < 1 {
-		err = errors.New("invalid email")
-		return
-	}
-	domain := email[i+1:]
-	if len(domain) == 0 {
-		err = errors.New("invalid email")
-		return
-	}
-	hash := getMD5(email)
-	baseurl, err := v.baseURL(domain, v.useHTTPS)
+func (v *Libravatar) FromEmail(email string) (string, error) {
+	addr, err := mail.ParseAddress(email)
 	if err != nil {
-		return
+		return "", err
 	}
-	url = baseurl + "/avatar/" + hash
 
-	// Append parameters as needed
-	sep := "?"
-	if v.useDomain {
-		url += sep + "domain=" + domain
-		sep = "&"
+	link, err := v.process(addr, nil)
+	if err != nil {
+		return "", err
 	}
-	if v.picSize != 0 {
-		url += sep + "s=" + string(v.picSize)
-		sep = "&"
-	}
-	if v.defUrl != "" {
-		url += sep + "d=" + v.defUrl
-		sep = "&"
-	}
-	return
+
+	return link, nil
 }
 
-// Return url of the avatar for the given url (tipically for OpenID)
-func (v *Libravatar) FromURL(in string) (url string, err error) {
-  parts := strings.Split(in, "/")
-	// http://domain <-- smallest valid, has 3 parts
-  if len(parts) < 3 {
-		err = errors.New("invalid url")
-		return
-	}
+// Object-less call to DefaultLibravatar for an email adders
+func FromEmail(email string) (string, error) {
+	return DefaultLibravatar.FromEmail(email)
+}
 
-	domain := parts[2]
-	if len(domain) == 0 {
-		err = errors.New("invalid email")
-		return
-	}
-
-	var useHTTPS = v.useHTTPS
-  if parts[0] == "https:" {
-      useHTTPS = true;
-  }
-
-	hash := getSHA256(in)
-	baseurl, err := v.baseURL(domain, useHTTPS)
+// Return url of the avatar for the given url (typically for OpenID)
+func (v *Libravatar) FromURL(openid string) (string, error) {
+	ourl, err := url.Parse(openid)
 	if err != nil {
-		return
+		return "", err
 	}
 
+	link, err := v.process(nil, ourl)
+	if err != nil {
+		return "", err
+	}
 
-	url = baseurl + "/avatar/" + hash
+	return link, nil
+}
 
-	// Append parameters as needed
-	sep := "?"
-	if v.useDomain {
-		url += sep + "domain=" + domain
-		sep = "&"
-	}
-	if v.picSize != 0 {
-		url += sep + "s=" + string(v.picSize)
-		sep = "&"
-	}
-	if v.defUrl != "" {
-		url += sep + "d=" + v.defUrl
-		sep = "&"
-	}
-	return
+// Object-less call to DefaultLibravatar for a URL
+func FromURL(openid string) (string, error) {
+	return DefaultLibravatar.FromURL(openid)
 }
