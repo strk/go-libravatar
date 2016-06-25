@@ -178,7 +178,15 @@ func (v *Libravatar) baseURL(email *mail.Address, openid *url.URL) (string, erro
 		domain = v.fallbackHost
 	}
 
-	_, addrs, err := net.LookupSRV(service, "tcp", v.getDomain(email, openid))
+	host := v.getDomain(email, openid)
+	key := cacheKey{service, host}
+	now := time.Now()
+	val, found := v.nameCache[key]
+	if found && now.Sub(val.checkedAt) <= v.nameCacheDuration {
+		return protocol + val.target, nil
+	}
+
+	_, addrs, err := net.LookupSRV(service, "tcp", host)
 	if err != nil && err.(*net.DNSError).IsTimeout {
 		return "", err
 	}
@@ -238,6 +246,7 @@ func (v *Libravatar) baseURL(email *mail.Address, openid *url.URL) (string, erro
 		domain = fmt.Sprintf("%s:%d", top_record.Target, top_record.Port)
 	}
 
+	v.nameCache[key] = cacheValue{checkedAt: now, target: domain}
 	return protocol + domain, nil
 }
 
