@@ -61,9 +61,9 @@ type Libravatar struct {
 	useHTTPS           bool
 	nameCache          map[cacheKey]cacheValue
 	nameCacheDuration  time.Duration
-	minAvatarSize      uint   // smallest image dimension allowed
-	maxAvatarSize      uint   // largest image dimension allowed
-	AvatarSize         uint   // what dimension should be used
+	minSize            uint   // smallest image dimension allowed
+	maxSize            uint   // largest image dimension allowed
+	size               uint   // what dimension should be used
 	serviceBase        string // SRV record to be queried for federation
 	secureServiceBase  string // SRV record to be queried for federation with secure servers
 }
@@ -75,9 +75,9 @@ func New() *Libravatar {
 	return &Libravatar{
 		fallbackHost:       `cdn.libravatar.org`,
 		secureFallbackHost: `seccdn.libravatar.org`,
-		minAvatarSize:      1,
-		maxAvatarSize:      512,
-		AvatarSize:         0, // unset, defaults to 80
+		minSize:            1,
+		maxSize:            512,
+		size:               0, // unset, defaults to 80
 		serviceBase:        `avatars`,
 		secureServiceBase:  `avatars-sec`,
 		nameCache:          make(map[cacheKey]cacheValue),
@@ -91,9 +91,20 @@ func (v *Libravatar) SetFallbackHost(host string) {
 	v.fallbackHost = host
 }
 
-// Set useHTTPS flag (only used with email)
+// Set the hostname for fallbacks in case no avatar service is defined
+// for a domain, when requiring secure domains
+func (v *Libravatar) SetSecureFallbackHost(host string) {
+	v.secureFallbackHost = host
+}
+
+// Set useHTTPS flag
 func (v *Libravatar) SetUseHTTPS(use bool) {
 	v.useHTTPS = use
+}
+
+// Set Avatars image dimension (0 for default)
+func (v *Libravatar) SetAvatarSize(size uint) {
+	v.size = size
 }
 
 // generate hash, either with email address or OpenID
@@ -142,8 +153,8 @@ func (v *Libravatar) process(email *mail.Address, openid *url.URL) (string, erro
 	if v.defUrl != "" {
 		values.Add("d", v.defUrl)
 	}
-	if v.AvatarSize > 0 {
-		values.Add("s", fmt.Sprintf("%d", v.AvatarSize))
+	if v.size > 0 {
+		values.Add("s", fmt.Sprintf("%d", v.size))
 	}
 
 	if len(values) > 0 {
