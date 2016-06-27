@@ -16,18 +16,14 @@ func TestFromEmail(t *testing.T) {
 		{"strk@kbt.io", "http://avatars.kbt.io/avatar/fe2a9e759730ee64c44bf8901bf4ccc3"},
 		{"strk@keybit.net", "http://cdn.libravatar.org/avatar/34bafd290f6f39380f5f87e0122daf83"},
 		{"strk@nonexistent.domain", "http://cdn.libravatar.org/avatar/3f30177111597990b15f8421eaf736c7"},
-		{"invalid", ""},
-		{"invalid@", ""},
-		{"@invalid", ""},
+		{"invalid", "mail: missing phrase"},
+		{"invalid@", "mail: no angle-addr"},
+		{"@invalid", "mail: missing word in phrase: mail: invalid string"},
 	}
 
 	for _, c := range cases {
 		got, err := avt.FromEmail(c.in)
 		if err != nil {
-			if c.want == "" {
-				t.Skipf("Forced error successfully (%s)", err)
-				continue
-			}
 			got = err.Error()
 		}
 		if got != c.want {
@@ -40,17 +36,14 @@ func TestFromEmail(t *testing.T) {
 	// OpenID tests
 
 	cases = []struct{ in, want string }{
-		{"https://strk.kbt.io/openid/", "https://cdn.libravatar.org/avatar/1eaf3174c95d0df02f177f7f6a1df5125ad3d6603fbd062defecd30810a0463c"},
-		{"invalid", ""},
+		{"https://strk.kbt.io/openid/", "http://cdn.libravatar.org/avatar/1eaf3174c95d0df02f177f7f6a1df5125ad3d6603fbd062defecd30810a0463c"},
+		{"invalid", "Is not an absolute URL"},
+		{"ssh://user@nothttp/", "Invalid protocol: ssh"},
 	}
 
 	for _, c := range cases {
 		got, err := avt.FromURL(c.in)
 		if err != nil {
-			if c.want == "" {
-				t.Skipf("Forced error successfully (%s)", err)
-				continue
-			}
 			got = err.Error()
 		}
 		if got != c.want {
