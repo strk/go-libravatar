@@ -20,6 +20,6 @@ https://gitlab.com/strk/go-libravatar
   
 # Contacts
 
-Project homepage: http://strk.kbt.io/projects/go/libravatar
-Maintainer: Sandro Santilli <strk@kbt.io>
+ * Project homepage: http://strk.kbt.io/projects/go/libravatar
+ * Maintainer: Sandro Santilli <strk@kbt.io>
 
