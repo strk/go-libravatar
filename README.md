@@ -1,6 +1,9 @@
 Simple [golang](https://www.golang.org) library for serving
 [federated avatars](https://www.libravatar.org)
 
+[![trunk](https://goreportcard.com/badge/strk.kbt.io/projects/go/libravatar)]
+(https://goreportcard.com/report/strk.kbt.io/projects/go/libravatar)
+
 # Use
 
 ```sh
