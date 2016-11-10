@@ -207,7 +207,7 @@ func (v *Libravatar) baseURL(email *mail.Address, openid *url.URL) (string, erro
 
 		var (
 			totalWeight uint16
-			records      []record
+			records     []record
 			topPriority = addrs[0].Priority
 			topRecord   *net.SRV
 		)
