@@ -5,7 +5,7 @@
 // Implements support for federated avatars lookup.
 // See https://wiki.libravatar.org/api/
 
-package libravatar // import "strk.kbt.io/projects/go/libravatar"
+package libravatar
 
 import (
 	"crypto/md5"
